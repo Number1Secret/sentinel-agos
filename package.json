@@ -1,0 +1,14 @@
+{
+  "name": "sentinel-mvp",
+  "version": "0.1.0",
+  "description": "Sentinel AI-Native Agency Platform - Scout Agent MVP",
+  "scripts": {
+    "install-browsers": "playwright install chromium --with-deps"
+  },
+  "dependencies": {
+    "playwright": "^1.41.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

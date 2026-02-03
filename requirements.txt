@@ -1,0 +1,37 @@
+# API
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-multipart==0.0.6
+
+# Supabase
+supabase==2.3.0
+
+# AI
+anthropic==0.18.0
+langsmith==0.0.87
+
+# Browser Automation
+playwright==1.41.0
+
+# Job Queue (Redis)
+redis==5.0.1
+rq==1.16.0
+
+# Sandbox
+e2b-code-interpreter==0.0.9
+
+# Utilities
+httpx==0.26.0
+python-dotenv==1.0.0
+structlog==24.1.0
+
+# PDF Generation
+weasyprint==60.2
+markdown==3.5.2
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+httpx==0.26.0

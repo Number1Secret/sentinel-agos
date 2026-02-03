@@ -1,0 +1,209 @@
+# render.yaml - Sentinel AgOS Infrastructure as Code
+# Deploy: Connect repo to Render, Blueprint auto-detected
+#
+# This Blueprint defines all services needed for the Sentinel AgOS:
+# - Web Service (FastAPI API)
+# - Background Workers (Legacy, Triage, Architect)
+# - Redis (Job queues)
+#
+# NOTE: PostgreSQL is managed by Supabase (external service)
+
+services:
+  # ===================
+  # WEB SERVICE (API)
+  # ===================
+  - type: web
+    name: sentinel-api
+    runtime: python
+    region: oregon
+    plan: starter
+    buildCommand: |
+      pip install -r requirements.txt
+    startCommand: |
+      uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: E2B_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sentinel-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MAX_AUDITS_PER_HOUR
+        value: "10"
+    autoDeploy: true
+
+  # ===================
+  # LEGACY AUDIT WORKER
+  # ===================
+  - type: worker
+    name: sentinel-worker
+    runtime: python
+    region: oregon
+    plan: starter
+    buildCommand: |
+      pip install -r requirements.txt
+      npx playwright install chromium --with-deps
+    startCommand: |
+      python -m worker.main --queue audit_queue
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: WORKER_TYPE
+        value: audit
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: E2B_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sentinel-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium
+    autoDeploy: true
+
+  # ===================
+  # TRIAGE WORKER (HIGH VOLUME)
+  # ===================
+  - type: worker
+    name: sentinel-triage-worker
+    runtime: python
+    region: oregon
+    plan: standard
+    buildCommand: |
+      pip install -r requirements.txt
+    startCommand: |
+      python -m worker.main --queue triage_queue
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: WORKER_TYPE
+        value: triage
+      - key: WORKER_CONCURRENCY
+        value: "10"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sentinel-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+    autoDeploy: true
+
+  # ===================
+  # ARCHITECT WORKER
+  # ===================
+  - type: worker
+    name: sentinel-architect-worker
+    runtime: python
+    region: oregon
+    plan: standard
+    buildCommand: |
+      pip install -r requirements.txt
+      npx playwright install chromium --with-deps
+    startCommand: |
+      python -m worker.main --queue architect_queue
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: WORKER_TYPE
+        value: architect
+      - key: WORKER_CONCURRENCY
+        value: "3"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: E2B_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sentinel-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium
+    autoDeploy: true
+
+  # ===================
+  # REDIS (Job Queue)
+  # ===================
+  - type: redis
+    name: sentinel-redis
+    region: oregon
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+# ===================
+# NOTES
+# ===================
+#
+# External Services Required:
+# ---------------------------
+# 1. Supabase Project (https://supabase.com)
+#    - Create a new project
+#    - Run supabase_schema.sql in SQL Editor
+#    - Copy URL, anon key, and service role key
+#    - Configure in Render Dashboard > Environment Variables
+#
+# 2. Anthropic API (https://console.anthropic.com)
+#    - Create API key
+#    - Configure ANTHROPIC_API_KEY in Render
+#
+# 3. E2B (https://e2b.dev) - Optional
+#    - Create API key for sandbox execution
+#    - Configure E2B_API_KEY in Render
+#
+# Deployment Steps:
+# -----------------
+# 1. Push code to GitHub
+# 2. Connect repo to Render
+# 3. Render auto-detects render.yaml
+# 4. Configure environment variables
+# 5. Deploy!
+#
+# Post-Deployment:
+# ----------------
+# - API will be at: https://sentinel-api.onrender.com
+# - Health check: https://sentinel-api.onrender.com/health
+# - API docs: https://sentinel-api.onrender.com/docs (dev only)
