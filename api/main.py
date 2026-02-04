@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 import structlog
 
 from api.middleware.auth import AuthMiddleware, RateLimitMiddleware
-from api.routes import auth_router, audits_router, webhooks_router, leads_router, batches_router
+from api.routes import auth_router, audits_router, webhooks_router, leads_router, batches_router, analytics_router
 from config import settings
 from schemas.analysis import HealthResponse, ErrorResponse
 
@@ -169,6 +169,7 @@ app.include_router(audits_router)
 app.include_router(webhooks_router)
 app.include_router(leads_router)
 app.include_router(batches_router)
+app.include_router(analytics_router)
 
 
 # Development server
