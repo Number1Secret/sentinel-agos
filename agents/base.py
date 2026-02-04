@@ -22,9 +22,9 @@ from config import settings
 
 logger = structlog.get_logger()
 
-# Pricing per 1M tokens (Claude 3.5 Sonnet)
-SONNET_INPUT_PRICE_PER_1M = Decimal("3.00")
-SONNET_OUTPUT_PRICE_PER_1M = Decimal("15.00")
+# Default pricing per 1M tokens (Claude 3.5 Sonnet) - used as fallback
+DEFAULT_INPUT_PRICE_PER_1M = Decimal("3.00")
+DEFAULT_OUTPUT_PRICE_PER_1M = Decimal("15.00")
 
 
 @dataclass
@@ -42,6 +42,9 @@ class AgentConfig:
     mcp_servers: list[str]
     timeout_seconds: int
     retry_attempts: int = 3
+    # Dynamic pricing from database (per 1M tokens)
+    input_price_per_1m: Decimal = DEFAULT_INPUT_PRICE_PER_1M
+    output_price_per_1m: Decimal = DEFAULT_OUTPUT_PRICE_PER_1M
 
 
 @dataclass
@@ -58,9 +61,12 @@ class AgentRunContext:
 
 @dataclass
 class TokenUsage:
-    """Tracks token usage across multiple LLM calls."""
+    """Tracks token usage across multiple LLM calls with dynamic pricing."""
     input_tokens: int = 0
     output_tokens: int = 0
+    # Dynamic pricing - set from AgentConfig when creating the usage tracker
+    input_price_per_1m: Decimal = DEFAULT_INPUT_PRICE_PER_1M
+    output_price_per_1m: Decimal = DEFAULT_OUTPUT_PRICE_PER_1M
 
     @property
     def total_tokens(self) -> int:
@@ -68,15 +74,23 @@ class TokenUsage:
 
     @property
     def cost_usd(self) -> Decimal:
-        """Calculate cost based on Claude 3.5 Sonnet pricing."""
-        input_cost = (Decimal(self.input_tokens) / Decimal(1_000_000)) * SONNET_INPUT_PRICE_PER_1M
-        output_cost = (Decimal(self.output_tokens) / Decimal(1_000_000)) * SONNET_OUTPUT_PRICE_PER_1M
+        """Calculate cost using dynamic pricing from agent config."""
+        input_cost = (Decimal(self.input_tokens) / Decimal(1_000_000)) * self.input_price_per_1m
+        output_cost = (Decimal(self.output_tokens) / Decimal(1_000_000)) * self.output_price_per_1m
         return input_cost + output_cost
 
     def add(self, input_tokens: int, output_tokens: int):
         """Add tokens from an LLM call."""
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
+
+    @classmethod
+    def from_config(cls, config: 'AgentConfig') -> 'TokenUsage':
+        """Create TokenUsage with pricing from agent config."""
+        return cls(
+            input_price_per_1m=config.input_price_per_1m,
+            output_price_per_1m=config.output_price_per_1m
+        )
 
 
 @dataclass
@@ -261,7 +275,7 @@ class BaseAgent(ABC):
         """
         self._run_id = context.run_id
         self._run_started_at = datetime.utcnow()
-        self._token_usage = TokenUsage()  # Reset for this run
+        self._token_usage = TokenUsage.from_config(self.config)  # Reset with dynamic pricing
         self._tool_calls = []
         self._mcp_calls = []
 
@@ -407,6 +421,10 @@ async def load_agent_config(db_service, agent_slug: str) -> AgentConfig:
     if not agent_data:
         raise ValueError(f"Agent '{agent_slug}' not found in database")
 
+    # Parse pricing with fallback to defaults
+    input_price = agent_data.get("input_price_per_1m")
+    output_price = agent_data.get("output_price_per_1m")
+
     return AgentConfig(
         id=UUID(agent_data["id"]),
         slug=agent_data["slug"],
@@ -419,5 +437,7 @@ async def load_agent_config(db_service, agent_slug: str) -> AgentConfig:
         tools=agent_data["tools"] if isinstance(agent_data["tools"], list) else [],
         mcp_servers=agent_data["mcp_servers"] or [],
         timeout_seconds=agent_data["timeout_seconds"],
-        retry_attempts=agent_data["retry_attempts"]
+        retry_attempts=agent_data["retry_attempts"],
+        input_price_per_1m=Decimal(str(input_price)) if input_price else DEFAULT_INPUT_PRICE_PER_1M,
+        output_price_per_1m=Decimal(str(output_price)) if output_price else DEFAULT_OUTPUT_PRICE_PER_1M
     )

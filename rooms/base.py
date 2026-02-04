@@ -6,11 +6,12 @@ Each room in the AgOS factory:
 - Processes leads in specific statuses
 - Uses a configured agent
 - Transitions leads to new statuses
+- Supports workflow graph handoff for the Infinite SDR engine
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Type, Any
-from uuid import UUID
+from typing import Optional, Type, Any, List
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -221,12 +222,14 @@ class BaseRoom(ABC):
         playbook_id: Optional[UUID] = None,
         user_id: Optional[UUID] = None,
         batch_id: Optional[UUID] = None,
-        trigger: str = "queue"
+        trigger: str = "queue",
+        workflow_id: Optional[UUID] = None
     ) -> dict:
         """
         Full execution flow for processing a lead.
 
         This is the main entry point called by the worker.
+        Supports workflow graph handoff for the Infinite SDR engine.
 
         Args:
             lead: Lead data from database
@@ -234,6 +237,7 @@ class BaseRoom(ABC):
             user_id: User who owns the lead
             batch_id: Optional batch this lead belongs to
             trigger: How this was triggered ('queue', 'api', 'manual')
+            workflow_id: Optional workflow for graph-based handoff
 
         Returns:
             Final lead state after processing
@@ -261,7 +265,16 @@ class BaseRoom(ABC):
 
             # Check if qualified based on result
             if self._is_qualified(result):
-                return await self.on_success(lead, result)
+                updated_lead = await self.on_success(lead, result)
+
+                # Workflow graph handoff (Infinite SDR feature)
+                if workflow_id or lead.get("workflow_id"):
+                    wf_id = workflow_id or UUID(lead["workflow_id"])
+                    next_room = await self._determine_next_room(updated_lead, result, wf_id)
+                    if next_room:
+                        await self._handoff_to_next(updated_lead, next_room, wf_id)
+
+                return updated_lead
             else:
                 # Not qualified = "failure" in terms of progression
                 return await self.on_failure(lead, "Did not meet qualification criteria")
@@ -274,6 +287,162 @@ class BaseRoom(ABC):
                 error=str(e)
             )
             return await self.on_failure(lead, str(e))
+
+    async def _determine_next_room(
+        self,
+        lead: dict,
+        result: dict,
+        workflow_id: UUID
+    ) -> Optional[str]:
+        """
+        Consult workflows table to determine next room in the graph.
+
+        Args:
+            lead: Updated lead data
+            result: Processing result
+            workflow_id: Workflow ID to consult
+
+        Returns:
+            Next room name, "human_approval", or None
+        """
+        if not self.db:
+            return None
+
+        try:
+            workflow = await self.db.get_workflow_by_id(workflow_id)
+            if not workflow:
+                logger.warning("Workflow not found", workflow_id=str(workflow_id))
+                return None
+
+            graph = workflow.get("graph", {})
+            approval_gates = workflow.get("approval_gates", [])
+
+            # Get next nodes for this room
+            next_nodes = graph.get(self.config.name)
+            if not next_nodes:
+                return None
+
+            # Handle complex graph structure
+            # e.g., {"qualified": "architect", "gold": ["enrich", "architect"]}
+            if isinstance(next_nodes, dict):
+                # Check for gold_lead path
+                logic_gates = result.get("logic_gate_results", {})
+                if logic_gates.get("gold_lead", {}).get("passed"):
+                    next_nodes = next_nodes.get("gold", next_nodes.get("qualified"))
+                else:
+                    next_nodes = next_nodes.get("qualified", next_nodes.get("default"))
+
+            # Normalize to list
+            if isinstance(next_nodes, str):
+                next_nodes = [next_nodes]
+
+            if not next_nodes:
+                return None
+
+            # Get first valid next node
+            for node in next_nodes:
+                if node in approval_gates:
+                    return "human_approval"
+                if node == "complete":
+                    return None
+                return node
+
+            return None
+
+        except Exception as e:
+            logger.error(
+                "Error determining next room",
+                workflow_id=str(workflow_id),
+                error=str(e)
+            )
+            return None
+
+    async def _handoff_to_next(
+        self,
+        lead: dict,
+        next_room: str,
+        workflow_id: UUID
+    ):
+        """
+        Hand off lead to the next room in the workflow.
+
+        Args:
+            lead: Lead data
+            next_room: Next room name or "human_approval"
+            workflow_id: Workflow ID
+        """
+        lead_id = UUID(lead["id"])
+
+        if next_room == "human_approval":
+            # Queue for human approval
+            await self._queue_for_approval(lead, workflow_id)
+        else:
+            # Update lead workflow position and queue for next room
+            try:
+                await self.db.update_lead(lead_id, {
+                    "workflow_position": next_room,
+                    "workflow_id": str(workflow_id)
+                })
+
+                # Queue lead for next room (implementation depends on queue system)
+                queue_name = f"{next_room}_queue"
+                logger.info(
+                    "Handing off lead to next room",
+                    lead_id=str(lead_id),
+                    from_room=self.config.name,
+                    to_room=next_room,
+                    queue=queue_name
+                )
+
+                # If using Redis queue, would publish here
+                # await self.db.queue_lead(queue_name, lead_id)
+
+            except Exception as e:
+                logger.error(
+                    "Failed to handoff lead",
+                    lead_id=str(lead_id),
+                    next_room=next_room,
+                    error=str(e)
+                )
+
+    async def _queue_for_approval(self, lead: dict, workflow_id: UUID):
+        """
+        Queue lead for human approval.
+
+        Args:
+            lead: Lead data
+            workflow_id: Workflow ID
+        """
+        lead_id = UUID(lead["id"])
+
+        try:
+            # Create approval queue entry
+            await self.db.create_approval_queue_entry(
+                lead_id=lead_id,
+                workflow_id=workflow_id,
+                gate_name=self.config.name,
+                current_room=self.config.name,
+                next_room=None,  # Will be determined after approval
+                approval_data={
+                    "triage_score": lead.get("triage_score"),
+                    "signals": lead.get("triage_signals"),
+                    "url": lead.get("url"),
+                    "company_name": lead.get("company_name")
+                }
+            )
+
+            logger.info(
+                "Lead queued for human approval",
+                lead_id=str(lead_id),
+                gate=self.config.name
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to queue for approval",
+                lead_id=str(lead_id),
+                error=str(e)
+            )
 
     async def get_playbook(self, playbook_id: Optional[UUID] = None) -> dict:
         """
