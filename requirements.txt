@@ -23,7 +23,6 @@ rq==1.16.0
 e2b-code-interpreter==0.0.9
 
 # Utilities
-httpx==0.26.0
 python-dotenv==1.0.0
 structlog==24.1.0
 
@@ -34,4 +33,3 @@ markdown==3.5.2
 # Testing
 pytest==7.4.4
 pytest-asyncio==0.23.3
-httpx==0.26.0
