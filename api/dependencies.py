@@ -31,6 +31,11 @@ async def get_db_service(
     return SupabaseService(use_admin=use_admin)
 
 
+async def get_supabase_service() -> SupabaseService:
+    """Get Supabase service dependency."""
+    return SupabaseService()
+
+
 async def get_current_user(
     authorization: Annotated[Optional[str], Header()] = None,
     supabase: Client = Depends(get_supabase),
