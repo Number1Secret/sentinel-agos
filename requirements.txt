@@ -6,10 +6,10 @@ pydantic-settings==2.1.0
 python-multipart==0.0.6
 
 # Supabase
-supabase==2.3.0
+supabase>=2.10.0
 
 # AI
-anthropic==0.18.0
+anthropic>=0.40.0
 langsmith==0.0.87
 
 # Browser Automation
