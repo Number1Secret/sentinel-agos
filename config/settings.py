@@ -31,6 +31,20 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
+    # Stripe (Room 3 - Discovery)
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+
+    # SendGrid (Room 3 - Comms Hub)
+    sendgrid_api_key: str = ""
+    sender_email: str = "sentinel@youragency.com"
+    sender_name: str = "Sentinel AgOS"
+
+    # Twilio (Room 3 - Comms Hub)
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_phone_number: str = ""
+
     # App Config
     environment: Literal["development", "staging", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
