@@ -18,6 +18,7 @@ from schemas.leads import (
     LeadUpdate,
     LeadResponse,
     LeadListResponse,
+    NegotiationResponse,
     TriageRequest,
     TriageResponse,
 )
@@ -341,3 +342,110 @@ async def queue_for_architect(
         message="Lead has been queued for architect processing",
         queued=True
     )
+
+
+@router.post(
+    "/{lead_id}/discovery",
+    response_model=TriageResponse,
+    summary="Queue lead for discovery"
+)
+async def queue_for_discovery(
+    lead_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    """
+    Queue a lead for discovery (closing) processing.
+
+    The lead must have status 'mockup_ready', 'presenting', or 'negotiating'.
+    """
+    lead = await db.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lead not found"
+        )
+
+    if lead.get("user_id") != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to process this lead"
+        )
+
+    allowed_statuses = ["mockup_ready", "presenting", "negotiating"]
+    if lead.get("status") not in allowed_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Lead must be in one of {allowed_statuses}. Current status: {lead.get('status')}"
+        )
+
+    # Queue the job
+    redis_client = get_redis_client()
+    job_data = {
+        "lead_id": str(lead_id),
+        "user_id": current_user["id"],
+        "trigger": "api"
+    }
+
+    redis_client.rpush("discovery_queue", json.dumps(job_data))
+
+    logger.info(
+        "Lead queued for discovery",
+        lead_id=str(lead_id),
+        user_id=current_user["id"]
+    )
+
+    return TriageResponse(
+        lead_id=lead_id,
+        status="queued",
+        message="Lead has been queued for discovery processing",
+        queued=True
+    )
+
+
+@router.get(
+    "/{lead_id}/negotiation",
+    response_model=NegotiationResponse,
+    summary="Get negotiation state"
+)
+async def get_negotiation_state(
+    lead_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: SupabaseService = Depends(get_supabase_service),
+):
+    """
+    Get the current negotiation state for a lead.
+
+    Returns pricing, SDR state, contact history, and deal status.
+    """
+    lead = await db.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lead not found"
+        )
+
+    if lead.get("user_id") != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this lead"
+        )
+
+    # Fetch negotiation state
+    try:
+        response = db.client.table("discovery_negotiations").select(
+            "*"
+        ).eq("lead_id", str(lead_id)).single().execute()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No negotiation record found for this lead"
+        )
+
+    if not response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No negotiation record found for this lead"
+        )
+
+    return NegotiationResponse(**response.data)

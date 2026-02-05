@@ -46,6 +46,22 @@ services:
         value: INFO
       - key: MAX_AUDITS_PER_HOUR
         value: "10"
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: SENDER_EMAIL
+        value: "sentinel@youragency.com"
+      - key: SENDER_NAME
+        value: "Sentinel AgOS"
     autoDeploy: true
 
   # ===================
@@ -165,6 +181,89 @@ services:
     autoDeploy: true
 
   # ===================
+  # DISCOVERY WORKER
+  # ===================
+  - type: worker
+    name: sentinel-discovery-worker
+    runtime: python
+    region: oregon
+    plan: standard
+    buildCommand: |
+      pip install -r requirements.txt
+    startCommand: |
+      python -m worker.main --queue discovery_queue
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: WORKER_TYPE
+        value: discovery
+      - key: WORKER_CONCURRENCY
+        value: "5"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: SENDER_EMAIL
+        value: "sentinel@youragency.com"
+      - key: SENDER_NAME
+        value: "Sentinel AgOS"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sentinel-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+    autoDeploy: true
+
+  # ===================
+  # SDR CRON JOB
+  # ===================
+  - type: cron
+    name: sentinel-sdr-cron
+    runtime: python
+    region: oregon
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: |
+      pip install -r requirements.txt
+    startCommand: |
+      python -m worker.tasks.discovery_cron
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sentinel-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+    autoDeploy: true
+
+  # ===================
   # REDIS (Job Queue)
   # ===================
   - type: redis
@@ -183,6 +282,7 @@ services:
 # 1. Supabase Project (https://supabase.com)
 #    - Create a new project
 #    - Run supabase_schema.sql in SQL Editor
+#    - Run migrations/002_discovery_schema.sql for Room 3
 #    - Copy URL, anon key, and service role key
 #    - Configure in Render Dashboard > Environment Variables
 #
@@ -193,6 +293,21 @@ services:
 # 3. E2B (https://e2b.dev) - Optional
 #    - Create API key for sandbox execution
 #    - Configure E2B_API_KEY in Render
+#
+# 4. Stripe (https://stripe.com) - Room 3 Discovery
+#    - Create account + API keys
+#    - Configure STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET
+#    - Set webhook endpoint to: https://sentinel-api.onrender.com/stripe/webhook
+#
+# 5. SendGrid (https://sendgrid.com) - Room 3 Comms (Optional)
+#    - Create API key with Mail Send permissions
+#    - Configure SENDGRID_API_KEY
+#    - Without key, emails are logged in dry-run mode
+#
+# 6. Twilio (https://twilio.com) - Room 3 Comms (Optional)
+#    - Create account + phone number
+#    - Configure TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
+#    - Without credentials, SMS are logged in dry-run mode
 #
 # Deployment Steps:
 # -----------------

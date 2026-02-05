@@ -72,6 +72,12 @@ class LeadResponse(LeadBase):
     brand_audit: Optional[dict] = None
     architect_completed_at: Optional[datetime] = None
 
+    # Discovery results
+    proposal_url: Optional[str] = None
+    proposal_sent_at: Optional[datetime] = None
+    deal_value: Optional[float] = None
+    close_probability: Optional[float] = None
+
     # Attribution
     user_id: Optional[UUID] = None
     assigned_to: Optional[UUID] = None
@@ -179,6 +185,38 @@ class TriageResponse(BaseModel):
     status: str
     message: str
     queued: bool
+
+
+# =====================
+# Negotiation Schemas
+# =====================
+
+class NegotiationResponse(BaseModel):
+    """Schema for negotiation state response."""
+    id: UUID
+    lead_id: UUID
+    base_price: Optional[float] = None
+    current_price: Optional[float] = None
+    min_acceptable_price: Optional[float] = None
+    max_discount_pct: Optional[float] = None
+    negotiation_state: str = "initial"
+    sdr_state: str = "initial_outreach"
+    total_touches: int = 0
+    emails_sent: int = 0
+    sms_sent: int = 0
+    last_contact_at: Optional[datetime] = None
+    last_prospect_action_at: Optional[datetime] = None
+    next_action_at: Optional[datetime] = None
+    objections: Optional[list] = None
+    discount_history: Optional[list] = None
+    stripe_checkout_session_id: Optional[str] = None
+    contract_pdf_url: Optional[str] = None
+    close_reason: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 # =====================

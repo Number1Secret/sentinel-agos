@@ -84,6 +84,13 @@ def _load_processors():
     except ImportError:
         logger.debug("Architect processor not available")
 
+    # Try to load discovery processor
+    try:
+        from worker.tasks.discovery import process_discovery_job
+        QUEUE_PROCESSORS["discovery_queue"] = process_discovery_job
+    except ImportError:
+        logger.debug("Discovery processor not available")
+
 
 class Worker:
     """
@@ -269,7 +276,8 @@ def get_queue_name(args) -> str:
     queue_map = {
         "audit": "audit_queue",
         "triage": "triage_queue",
-        "architect": "architect_queue"
+        "architect": "architect_queue",
+        "discovery": "discovery_queue",
     }
     return queue_map.get(worker_type, "audit_queue")
 
